@@ -1,0 +1,25 @@
+version: "3.7"
+
+networks:
+  development: {}
+
+volumes:
+  api-packages: {}
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.development
+    env_file:
+      - .env.development
+      - .env.local
+    command: ["tail", "-f", "/dev/null"]
+    volumes:
+      - ".:/app"
+      - "api-packages:/go/pkg"
+    networks:
+      - development
+    labels:
+      todoapp-go.service: api
+
