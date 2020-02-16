@@ -3,11 +3,13 @@ package app_config
 import "os"
 
 type appConfig struct {
-	Mode string
+	DatabaseUrl string
+	Mode        string
 }
 
 func New() appConfig {
 	return appConfig{
-		Mode: os.Getenv("TODOAPP_MODE"),
+		DatabaseUrl: os.Getenv("TODOAPP_DATABASE_URL"),
+		Mode:        os.Getenv("TODOAPP_MODE"),
 	}
 }
