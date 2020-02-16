@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+
+# frozen_string_literal: true
+
+require 'bundler'
+Bundler.require
+
+require_relative '../../src/migrator/migrator'
+
+log    = Logger.new(STDOUT)
+config = Toolbox::Migrator::Config.new(env: ENV)
+conn   = PG.connect(config.db_url)
+
+Toolbox::Migrator::Bootstrap.new(connection: conn, logger: log).call
+
+Toolbox::Migrator::Applier.new(connection: conn, logger: log).call(
+  migrations:
+    Toolbox::Migrator::MigrationsList
+      .new(connection: conn, logger: log)
+      .pending(path: config.migrations_dir)
+)
+
+dump_path = File.expand_path('../../schema.sql', __dir__)
+
+system <<~SH
+  pg_dump --schema-only --file \"#{dump_path}\" \"#{config.db_url}\"
+SH

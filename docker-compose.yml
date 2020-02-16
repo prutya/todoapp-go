@@ -1,25 +1,72 @@
 version: "3.7"
 
+volumes:
+  api-packages: {}
+  toolbox-packages: {}
+  postgres-data: {}
+
 networks:
   development: {}
 
-volumes:
-  api-packages: {}
+x-service-api: &service-api
+  build:
+    context: ./api
+    dockerfile: Dockerfile.development
+  volumes:
+    - "./api:/app"
+    - "api-packages:/go/pkg"
+
+x-service-toolbox: &service-toolbox
+  build:
+    context: ./toolbox
+    dockerfile: Dockerfile
+  volumes:
+    - ./toolbox:/usr/src/app
+    - toolbox-packages:/usr/local/bundle
+
+x-service-postgres: &service-postgres
+  image: postgres:12.1-alpine
+  environment:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: todoapp
+    PGDATA: /var/lib/postgresql/data
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile.development
+    <<: *service-api
     env_file:
-      - .env.development
-      - .env.local
+      - ./api/.env.development
+      - ./api/.env.local
     command: ["tail", "-f", "/dev/null"]
+    ports:
+      - "8080:8080"
+    networks:
+      - development
+    depends_on:
+      - postgres
+    labels:
+      todoapp-go.service: api
+
+  toolbox:
+    <<: *service-toolbox
+    environment:
+      TOOLBOX_DB_URL: "postgresql://postgres:postgres@postgres:5432/todoapp"
+    networks:
+      - development
+    depends_on:
+      - postgres
+    labels:
+      todoapp-go.service: toolbox
+
+  postgres:
+    <<: *service-postgres
+    ports:
+      - 5432:5432
     volumes:
-      - ".:/app"
-      - "api-packages:/go/pkg"
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - development
     labels:
-      todoapp-go.service: api
+      todoapp-go.service: postgres
 

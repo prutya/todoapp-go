@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+
+# frozen_string_literal: true
+
+require 'bundler'
+Bundler.require
+
+require_relative '../../src/migrator/migrator'
+
+log = Logger.new(STDOUT)
+
+unless (name = ARGV[0])
+  log.error('Migration name is not provided')
+  exit 1
+end
+
+current_time = Time.now.utc
+
+fname = "#{current_time.strftime('%Y%m%d%H%M%S')}-#{name}.sql"
+
+File.open(File.expand_path("../../migrations/#{fname}", __dir__), 'w') do |f|
+  f << <<~SQL
+    --migrator:up
+
+    --migrator:down
+  SQL
+end
