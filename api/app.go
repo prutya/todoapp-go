@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -44,6 +45,11 @@ type UserDTO struct {
 	Roles  []string  `json:"roles"`
 }
 
+type SessionDTOCreateInput struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
 func main() {
 	config := app_config.New()
 
@@ -70,14 +76,12 @@ func main() {
 
 	router.POST("/users", func(ctx *gin.Context) {
 		var inputJson UserDTOCreateInput
-
 		if err := ctx.ShouldBindJSON(&inputJson); err != nil {
-			// TODO: Hide Go error
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			ctx.JSON(http.StatusBadRequest, gin.H{})
 			return
 		}
 
-		row := db.QueryRow(`SELECT 1 FROM users WHERE login=$1;`, inputJson.Login)
+		row := db.QueryRow(`SELECT 1 FROM users WHERE login=$1`, inputJson.Login)
 
 		var userExists int
 		switch err = row.Scan(&userExists); err {
@@ -91,7 +95,7 @@ func main() {
 
 		var passwordDigest, err = bcrypt.GenerateFromPassword(
 			[]byte(inputJson.Password),
-			14,
+			config.BcryptCost,
 		)
 
 		if err != nil {
@@ -120,7 +124,54 @@ func main() {
 	})
 
 	router.POST("/sessions", func(ctx *gin.Context) {
-		// TODO: Create a session
+		var inputJson SessionDTOCreateInput
+		if err := ctx.ShouldBindJSON(&inputJson); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{})
+			return
+		}
+
+		var id uuid.UUID
+		var passwordDigest string
+		row := db.QueryRow(`
+			SELECT id, password_digest
+			FROM users
+			WHERE login=$1
+		`, inputJson.Login)
+
+		switch err = row.Scan(&id, &passwordDigest); err {
+		case sql.ErrNoRows:
+			// TODO: Prevent a timing attack
+			ctx.JSON(http.StatusUnauthorized, gin.H{})
+			return
+		case nil:
+		default:
+			panic(err)
+		}
+
+		err = bcrypt.CompareHashAndPassword(
+			[]byte(passwordDigest),
+			[]byte(inputJson.Password),
+		)
+
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{})
+			return
+		}
+
+		currentTimeUnix := time.Now().Unix()
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"user_id": id,
+			"exp":     currentTimeUnix + config.AuthExpirySeconds,
+			"iat":     currentTimeUnix,
+		})
+
+		tokenString, tokenErr := token.SignedString([]byte(config.AuthSecret))
+
+		if tokenErr != nil {
+			panic(tokenErr)
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{"jwt": tokenString})
 	})
 
 	router.POST("/todos", func(ctx *gin.Context) {
