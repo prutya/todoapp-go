@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -45,6 +46,14 @@ type UserDTO struct {
 	Roles  []string  `json:"roles"`
 }
 
+type UserDTOShowInputUri struct {
+	Id string `uri:"id" binding:"required"`
+}
+
+type UserDTOShowInputHeaders struct {
+	Authorization string `uri:"Authorization"`
+}
+
 type SessionDTOCreateInput struct {
 	Login    string `json:"login"`
 	Password string `json:"password"`
@@ -81,7 +90,11 @@ func main() {
 			return
 		}
 
-		row := db.QueryRow(`SELECT 1 FROM users WHERE login=$1`, inputJson.Login)
+		row := db.QueryRow(`
+			SELECT 1
+			FROM users
+			WHERE login=$1
+		`, inputJson.Login)
 
 		var userExists int
 		switch err = row.Scan(&userExists); err {
@@ -119,8 +132,63 @@ func main() {
 	})
 
 	router.GET("/users/:id", func(ctx *gin.Context) {
-		// TODO: Authenticate
-		// TODO: Find a user by id if it is the current user
+		var paramsUri UserDTOShowInputUri
+
+		if err := ctx.ShouldBindUri(&paramsUri); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{})
+			return
+		}
+
+		var paramsHeaders UserDTOShowInputHeaders
+
+		if err = ctx.ShouldBindHeader(&paramsHeaders); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{})
+			return
+		}
+
+		token, tokenErr := jwt.Parse(
+			paramsHeaders.Authorization,
+			func(token *jwt.Token) (interface{}, error) {
+				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+				}
+
+				return []byte(config.AuthSecret), nil
+			},
+		)
+
+		if tokenErr != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{})
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+
+		if !ok || !token.Valid {
+			ctx.JSON(http.StatusUnauthorized, gin.H{})
+			return
+		}
+
+		if !(paramsUri.Id == "current" || paramsUri.Id == claims["user_id"]) {
+			fmt.Println(paramsUri.Id)
+			ctx.JSON(http.StatusForbidden, gin.H{})
+			return
+		}
+
+		var user UserDTO
+		row := db.QueryRow(`
+			SELECT id, login, locale, roles
+			FROM users
+			WHERE id=$1
+		`, claims["user_id"])
+
+		dbErr := row.Scan(&user.Id, &user.Login, &user.Locale, pq.Array(&user.Roles))
+
+		if dbErr != nil {
+			panic(dbErr)
+		}
+
+		ctx.JSON(http.StatusOK, user)
 	})
 
 	router.POST("/sessions", func(ctx *gin.Context) {
@@ -171,7 +239,7 @@ func main() {
 			panic(tokenErr)
 		}
 
-		ctx.JSON(http.StatusOK, gin.H{"jwt": tokenString})
+		ctx.JSON(http.StatusCreated, gin.H{"jwt": tokenString})
 	})
 
 	router.POST("/todos", func(ctx *gin.Context) {
